@@ -78,12 +78,12 @@ const handleSubmit = async (e) => {
 
   try {
     // Step 1: Get transcript info for accurate timing
-    const transcriptInfoPromise = axios.post('/get-transcript-info', {
+    const transcriptInfoPromise = axios.post('https://youtube-to-text-51uc.onrender.com/get-transcript-info', {
       youtube_url: youtubeUrl
     });
     
     // Step 2: Start main processing
-    const processingPromise = axios.post('/clean-transcript', {
+    const processingPromise = axios.post('https://youtube-to-text-51uc.onrender.com/clean-transcript', {
       youtube_url: youtubeUrl
     });
     
@@ -122,7 +122,7 @@ const handleFeedbackSubmit = async (e) => {
 
   setFeedbackSubmitting(true);
   try {
-    await axios.post('/send-feedback', feedbackForm);
+    await axios.post('https://youtube-to-text-51uc.onrender.com/send-feedback', feedbackForm);
     setFeedbackSuccess(true);
     setFeedbackForm({ name: '', email: '', comments: '' });
     setTimeout(() => {
