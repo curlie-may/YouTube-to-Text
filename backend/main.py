@@ -6,6 +6,8 @@ import smtplib
 import email.mime.text
 import email.mime.multipart
 import difflib
+import random
+import requests
 from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -28,6 +30,12 @@ app.add_middleware(
 )
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Smartproxy (Decodo) configuration
+SMARTPROXY_USERNAME = os.getenv('SMARTPROXY_USERNAME')
+SMARTPROXY_PASSWORD = os.getenv('SMARTPROXY_PASSWORD')
+SMARTPROXY_ENDPOINT = os.getenv('SMARTPROXY_ENDPOINT', 'gate.decodo.com')
+SMARTPROXY_PORT = os.getenv('SMARTPROXY_PORT', '10001')
 
 # Global counter for conversions (in production, use a database)
 conversion_counter = 0
@@ -52,6 +60,22 @@ class FeedbackRequest(BaseModel):
     name: str = ""
     email: str = ""
     comments: str
+
+def get_proxy_config():
+    """Generate proxy configuration for requests"""
+    if not SMARTPROXY_USERNAME or not SMARTPROXY_PASSWORD:
+        return None
+    
+    # Generate random session ID to rotate IPs
+    session_id = random.randint(1000, 9999)
+    proxy_user = f"{SMARTPROXY_USERNAME}-session-{session_id}"
+    
+    proxy_config = {
+        'http': f'http://{proxy_user}:{SMARTPROXY_PASSWORD}@{SMARTPROXY_ENDPOINT}:{SMARTPROXY_PORT}',
+        'https': f'http://{proxy_user}:{SMARTPROXY_PASSWORD}@{SMARTPROXY_ENDPOINT}:{SMARTPROXY_PORT}'
+    }
+    
+    return proxy_config
 
 class CaptionCleaningAgent:
     def __init__(self):
@@ -82,12 +106,33 @@ class CaptionCleaningAgent:
         raise ValueError("Invalid YouTube URL")
     
     async def get_captions(self, video_id: str) -> str:
-        """Get captions from YouTube video"""
+        """Get captions from YouTube video using proxy"""
         try:
+            # Get proxy configuration
+            proxy_config = get_proxy_config()
+            
+            if proxy_config:
+                # Create a custom session with proxy
+                session = requests.Session()
+                session.proxies.update(proxy_config)
+                
+                # Monkey patch the youtube-transcript-api to use our session
+                import youtube_transcript_api._api
+                youtube_transcript_api._api.requests = session
+                
+                print(f"Using Smartproxy: {SMARTPROXY_ENDPOINT}:{SMARTPROXY_PORT}")
+            else:
+                print("No proxy configuration found, using direct connection")
+            
+            # Get transcript using the potentially proxied session
             transcript = YouTubeTranscriptApi.get_transcript(video_id)
             full_text = " ".join([entry['text'] for entry in transcript])
+            
+            print(f"Successfully retrieved transcript for video {video_id} (using proxy: {proxy_config is not None})")
             return full_text
+            
         except Exception as e:
+            print(f"Error getting captions for video {video_id}: {str(e)}")
             raise HTTPException(status_code=404, detail=f"Could not retrieve captions: {str(e)}")
     
     async def detect_video_context(self, text: str) -> str:
@@ -522,7 +567,13 @@ async def get_conversion_count():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    """Health check endpoint with proxy status"""
+    proxy_status = "configured" if SMARTPROXY_USERNAME else "not configured"
+    return {
+        "status": "healthy", 
+        "proxy_status": proxy_status,
+        "proxy_endpoint": f"{SMARTPROXY_ENDPOINT}:{SMARTPROXY_PORT}" if SMARTPROXY_USERNAME else None
+    }
 
 if __name__ == "__main__":
     import uvicorn
