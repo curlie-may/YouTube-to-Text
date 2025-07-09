@@ -1,3 +1,4 @@
+#Incorporates yt-dlp, removes youtube-transcript-api, keep SmarProxy
 import re
 import asyncio
 from typing import List, Dict
@@ -8,10 +9,10 @@ import email.mime.multipart
 import difflib
 import random
 import requests
+import yt_dlp
 from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from youtube_transcript_api import YouTubeTranscriptApi
 from openai import OpenAI
 from dotenv import load_dotenv
 import json
@@ -34,7 +35,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # Smartproxy (Decodo) configuration
 SMARTPROXY_USERNAME = os.getenv('SMARTPROXY_USERNAME')
 SMARTPROXY_PASSWORD = os.getenv('SMARTPROXY_PASSWORD')
-SMARTPROXY_ENDPOINT = os.getenv('SMARTPROXY_ENDPOINT', 'gate.decodo.com')
+SMARTPROXY_ENDPOINT = os.getenv('SMARTPROXY_ENDPOINT', 'us.decodo.com')
 SMARTPROXY_PORT = os.getenv('SMARTPROXY_PORT', '10001')
 
 # Global counter for conversions (in production, use a database)
@@ -66,9 +67,8 @@ def get_proxy_config():
     if not SMARTPROXY_USERNAME or not SMARTPROXY_PASSWORD:
         return None
     
-    # Generate random session ID to rotate IPs
-    session_id = random.randint(1000, 9999)
-    proxy_user = f"{SMARTPROXY_USERNAME}-session-{session_id}"
+    # Simple authentication - no sessions for country endpoint
+    proxy_user = f"{SMARTPROXY_USERNAME}"
     
     proxy_config = {
         'http': f'http://{proxy_user}:{SMARTPROXY_PASSWORD}@{SMARTPROXY_ENDPOINT}:{SMARTPROXY_PORT}',
@@ -106,34 +106,151 @@ class CaptionCleaningAgent:
         raise ValueError("Invalid YouTube URL")
     
     async def get_captions(self, video_id: str) -> str:
-        """Get captions from YouTube video using proxy"""
+        """Get captions from YouTube video using yt-dlp with proxy"""
         try:
-            # Get proxy configuration
-            proxy_config = get_proxy_config()
+            # Prepare yt-dlp options
+            ydl_opts = {
+                'writesubtitles': True,
+                'writeautomaticsub': True,
+                'subtitleslangs': ['en'],
+                'skip_download': True,
+                'quiet': True,
+                'no_warnings': True,
+            }
             
-            if proxy_config:
-                # Create a custom session with proxy
-                session = requests.Session()
-                session.proxies.update(proxy_config)
-                
-                # Monkey patch the youtube-transcript-api to use our session
-                import youtube_transcript_api._api
-                youtube_transcript_api._api.requests = session
-                
+            # Add proxy configuration if available
+            if SMARTPROXY_USERNAME and SMARTPROXY_PASSWORD:
+                # Simple yt-dlp proxy format for country endpoint
+                proxy_user = f"{SMARTPROXY_USERNAME}"
+                proxy_url = f"http://{proxy_user}:{SMARTPROXY_PASSWORD}@{SMARTPROXY_ENDPOINT}:{SMARTPROXY_PORT}"
+                ydl_opts['proxy'] = proxy_url
                 print(f"Using Smartproxy: {SMARTPROXY_ENDPOINT}:{SMARTPROXY_PORT}")
+                print(f"Proxy URL format: http://{proxy_user}:****@{SMARTPROXY_ENDPOINT}:{SMARTPROXY_PORT}")
             else:
                 print("No proxy configuration found, using direct connection")
             
-            # Get transcript using the potentially proxied session
-            transcript = YouTubeTranscriptApi.get_transcript(video_id)
-            full_text = " ".join([entry['text'] for entry in transcript])
+            video_url = f"https://www.youtube.com/watch?v={video_id}"
             
-            print(f"Successfully retrieved transcript for video {video_id} (using proxy: {proxy_config is not None})")
-            return full_text
-            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                # Extract video info and subtitles
+                info = ydl.extract_info(video_url, download=False)
+                
+                # Get subtitles
+                subtitles = info.get('subtitles', {})
+                auto_subtitles = info.get('automatic_captions', {})
+                
+                # Try to get English subtitles
+                transcript_text = ""
+                
+                if 'en' in subtitles:
+                    # Use manual subtitles first (higher quality)
+                    subtitle_entries = subtitles['en']
+                    transcript_text = await self.extract_text_from_subtitle_entries(subtitle_entries, True)
+                elif 'en' in auto_subtitles:
+                    # Fall back to auto-generated subtitles
+                    subtitle_entries = auto_subtitles['en']
+                    transcript_text = await self.extract_text_from_subtitle_entries(subtitle_entries, True)
+                else:
+                    raise Exception("No English subtitles found for this video")
+                
+                print(f"Successfully retrieved transcript for video {video_id} (using proxy: {SMARTPROXY_USERNAME is not None})")
+                return transcript_text.strip()
+                
         except Exception as e:
             print(f"Error getting captions for video {video_id}: {str(e)}")
             raise HTTPException(status_code=404, detail=f"Could not retrieve captions: {str(e)}")
+    
+    async def extract_text_from_subtitle_entries(self, subtitle_entries: List[Dict], use_proxy: bool = False) -> str:
+        """Extract text from subtitle entries"""
+        try:
+            # Find the best subtitle format (prefer vtt, then srt)
+            best_entry = None
+            for entry in subtitle_entries:
+                if entry.get('ext') == 'vtt':
+                    best_entry = entry
+                    break
+                elif entry.get('ext') == 'srv1':  # YouTube's JSON format
+                    best_entry = entry
+                    break
+                elif entry.get('ext') == 'srt':
+                    best_entry = entry
+            
+            if not best_entry:
+                best_entry = subtitle_entries[0]  # Use first available
+            
+            subtitle_url = best_entry['url']
+            
+            # Download subtitle content
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            
+            proxies = {}
+            if use_proxy and SMARTPROXY_USERNAME:
+                # Simple proxy format for country endpoint
+                proxy_user = f"{SMARTPROXY_USERNAME}"
+                proxy_url = f"http://{proxy_user}:{SMARTPROXY_PASSWORD}@{SMARTPROXY_ENDPOINT}:{SMARTPROXY_PORT}"
+                proxies = {'http': proxy_url, 'https': proxy_url}
+            
+            response = requests.get(subtitle_url, headers=headers, proxies=proxies, timeout=30)
+            response.raise_for_status()
+            
+            # DEBUG: Add debugging information
+            print(f"Response status: {response.status_code}")
+            print(f"Response content type: {response.headers.get('content-type', 'unknown')}")
+            print(f"Response content (first 200 chars): {response.text[:200]}")
+            print(f"Subtitle format detected: {best_entry.get('ext')}")
+            print(f"Subtitle URL: {subtitle_url}")
+            
+            # Parse subtitle content based on format
+            if best_entry.get('ext') == 'srv1':
+                # Handle YouTube's XML format (srv1 is XML, not JSON)
+                import xml.etree.ElementTree as ET
+                try:
+                    root = ET.fromstring(response.text)
+                    text_parts = []
+                    
+                    # Extract text from <text> elements
+                    for text_elem in root.findall('text'):
+                        text_content = text_elem.text
+                        if text_content:
+                            # Decode HTML entities
+                            import html
+                            decoded_text = html.unescape(text_content)
+                            text_parts.append(decoded_text)
+                    
+                    return ' '.join(text_parts)
+                    
+                except ET.ParseError as e:
+                    print(f"XML parsing error: {e}")
+                    print(f"Response content: {response.text[:500]}")
+                    raise Exception(f"Failed to parse XML subtitle content: {e}")
+            
+            else:
+                # Handle VTT/SRT formats - extract text only
+                lines = response.text.split('\n')
+                text_parts = []
+                
+                for line in lines:
+                    line = line.strip()
+                    # Skip timestamp lines and metadata
+                    if (line and 
+                        not line.startswith('WEBVTT') and 
+                        not line.startswith('NOTE') and
+                        not '-->' in line and
+                        not line.isdigit() and
+                        not line.startswith('<')):
+                        
+                        # Remove VTT formatting tags
+                        clean_line = re.sub(r'<[^>]+>', '', line)
+                        if clean_line:
+                            text_parts.append(clean_line)
+                
+                return ' '.join(text_parts)
+                
+        except Exception as e:
+            print(f"Error extracting subtitle text: {str(e)}")
+            raise Exception(f"Failed to extract subtitle text: {str(e)}")
     
     async def detect_video_context(self, text: str) -> str:
         """Analyze video content to understand context/domain"""
