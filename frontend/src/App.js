@@ -25,7 +25,7 @@ const [feedbackSuccess, setFeedbackSuccess] = useState(false);
 useEffect(() => {
   const fetchConversionCount = async () => {
     try {
-      const response = await axios.get(${API_BASE_URL}/conversion-count);
+      const response = await axios.get(`${API_BASE_URL}/conversion-count`);
       setConversionCount(response.data.count);
     } catch (err) {
       console.error('Failed to fetch conversion count');
@@ -81,12 +81,12 @@ const handleSubmit = async (e) => {
 
   try {
     // Step 1: Get transcript info for accurate timing
-    const transcriptInfoPromise = axios.post(${API_BASE_URL}/get-transcript-info, {
+    const transcriptInfoPromise = axios.post(`${API_BASE_URL}/get-transcript-info`, {
       youtube_url: youtubeUrl
     });
     
     // Step 2: Start main processing
-    const processingPromise = axios.post(${API_BASE_URL}/clean-transcript, {
+    const processingPromise = axios.post(`${API_BASE_URL}/clean-transcript`, {
       youtube_url: youtubeUrl
     });
     
@@ -125,7 +125,7 @@ const handleFeedbackSubmit = async (e) => {
 
   setFeedbackSubmitting(true);
   try {
-    await axios.post(${API_BASE_URL}/send-feedback, feedbackForm);
+    await axios.post(`${API_BASE_URL}/send-feedback`, feedbackForm);
     setFeedbackSuccess(true);
     setFeedbackForm({ name: '', email: '', comments: '' });
     setTimeout(() => {
