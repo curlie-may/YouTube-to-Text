@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './App.css';
 
+// This is the backend URL for Render.  
+const API_BASE_URL = 'https://youtube-to-text-51uc.onrender.com';
+
 function App() {
 const [youtubeUrl, setYoutubeUrl] = useState('');
 const [loading, setLoading] = useState(false);
@@ -22,7 +25,7 @@ const [feedbackSuccess, setFeedbackSuccess] = useState(false);
 useEffect(() => {
   const fetchConversionCount = async () => {
     try {
-      const response = await axios.get('/conversion-count');
+      const response = await axios.get(${API_BASE_URL}/conversion-count);
       setConversionCount(response.data.count);
     } catch (err) {
       console.error('Failed to fetch conversion count');
@@ -78,12 +81,12 @@ const handleSubmit = async (e) => {
 
   try {
     // Step 1: Get transcript info for accurate timing
-    const transcriptInfoPromise = axios.post('https://youtube-to-text-51uc.onrender.com/get-transcript-info', {
+    const transcriptInfoPromise = axios.post(${API_BASE_URL}/get-transcript-info, {
       youtube_url: youtubeUrl
     });
     
     // Step 2: Start main processing
-    const processingPromise = axios.post('https://youtube-to-text-51uc.onrender.com/clean-transcript', {
+    const processingPromise = axios.post(${API_BASE_URL}/clean-transcript, {
       youtube_url: youtubeUrl
     });
     
@@ -122,7 +125,7 @@ const handleFeedbackSubmit = async (e) => {
 
   setFeedbackSubmitting(true);
   try {
-    await axios.post('https://youtube-to-text-51uc.onrender.com/send-feedback', feedbackForm);
+    await axios.post(${API_BASE_URL}/send-feedback, feedbackForm);
     setFeedbackSuccess(true);
     setFeedbackForm({ name: '', email: '', comments: '' });
     setTimeout(() => {
