@@ -1,5 +1,5 @@
 #Incorporates yt-dlp, removes youtube-transcript-api, keep SmarProxy
-#Add ['en.*'] to line subtitleslangs to accept all English captions 
+# Add 'subtitleslangs':['en', 'en-US', 'en-GB', 'en-orig', 'en-CA', 'en-AU'],  Allows range of English caption types
 import re
 import asyncio
 from typing import List, Dict
@@ -113,7 +113,7 @@ class CaptionCleaningAgent:
             ydl_opts = {
                 'writesubtitles': True,
                 'writeautomaticsub': True,
-                'subtitleslangs': ['en.*'],   #en.* accepts all English captions
+                'subtitleslangs': ['en', 'en-US', 'en-GB', 'en-orig', 'en-CA', 'en-AU'],   #Add range of English caption types
                 'skip_download': True,
                 'quiet': True,
                 'no_warnings': True,
