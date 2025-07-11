@@ -1,5 +1,4 @@
-#Incorporates yt-dlp, removes youtube-transcript-api, keep SmarProxy
-# Add 'subtitleslangs':['en', 'en-US', 'en-GB', 'en-orig', 'en-CA', 'en-AU'],  Allows range of English caption types
+#Incorporates yt-dlp, removes youtube-transcript-api, removed SmartProxy
 import re
 import asyncio
 from typing import List, Dict
@@ -113,14 +112,15 @@ class CaptionCleaningAgent:
             ydl_opts = {
                 'writesubtitles': True,
                 'writeautomaticsub': True,
-                'subtitleslangs': ['en', 'en-US', 'en-GB', 'en-orig', 'en-CA', 'en-AU'],   #Add range of English caption types
+                'subtitleslangs': ['en'],  
                 'skip_download': True,
                 'quiet': True,
                 'no_warnings': True,
             }
             
             # Add proxy configuration if available
-            if SMARTPROXY_USERNAME and SMARTPROXY_PASSWORD:
+            #if SMARTPROXY_USERNAME and SMARTPROXY_PASSWORD:  //disable this line to remove SmartProxy using Claude 10-July-2025
+            if False:       #add this line using Claude 10-July-2025
                 # Simple yt-dlp proxy format for country endpoint
                 proxy_user = f"{SMARTPROXY_USERNAME}"
                 proxy_url = f"http://{proxy_user}:{SMARTPROXY_PASSWORD}@{SMARTPROXY_ENDPOINT}:{SMARTPROXY_PORT}"
@@ -187,7 +187,8 @@ class CaptionCleaningAgent:
             }
             
             proxies = {}
-            if use_proxy and SMARTPROXY_USERNAME:
+            #if use_proxy and SMARTPROXY_USERNAME:  //disable this line to debug SmartProxy using Claude 10-July-2025
+            if False:   #Add this line using Claude 10-July-2025    
                 # Simple proxy format for country endpoint
                 proxy_user = f"{SMARTPROXY_USERNAME}"
                 proxy_url = f"http://{proxy_user}:{SMARTPROXY_PASSWORD}@{SMARTPROXY_ENDPOINT}:{SMARTPROXY_PORT}"
